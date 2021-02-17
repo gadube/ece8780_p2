@@ -6,9 +6,9 @@ OPENCV_LD_FLAGS = -L $(OPENCV_ROOT)/lib64 -lopencv_core -lopencv_imgproc -lopenc
 
 CUDA_INCLUDEPATH=/usr/local/cuda/include
 
-NVCC_OPTS=-arch=sm_30 
+NVCC_OPTS=-arch=sm_70 -DBLOCK=32
 GCC_OPTS=-std=c++11 -g -O3 -Wall 
-CUDA_LD_FLAGS=-L -lcuda -lcudart
+CUDA_LD_FLAGS=-L $(CUDA_ROOT)/lib64 -lcudart
 
 final: main.o blur.o
 	g++ -o gblur main.o blur_kernels.o $(CUDA_LD_FLAGS) $(OPENCV_LD_FLAGS)
