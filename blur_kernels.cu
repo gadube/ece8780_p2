@@ -9,7 +9,6 @@ __global__
 void gaussianBlur(unsigned char *d_in, unsigned char *d_out, 
         const int rows, const int cols, float *d_filter, const int filterWidth){
 
-
 } 
 
 
@@ -21,8 +20,19 @@ void gaussianBlur(unsigned char *d_in, unsigned char *d_out,
 __global__ 
 void separateChannels(uchar4 *d_imrgba, unsigned char *d_r, unsigned char *d_g, unsigned char *d_b,
         const int rows, const int cols){
+	int i;
+	int c = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.x * blockDim.x + threadIdx.x;
 
-
+	// split uchar4 into r, g, b px values
+	if (c < cols && r < rows){
+		i = r * cols + c;
+		d_r[i] = d_imrgba[i].x;
+		d_g[i] = d_imrgba[i].y;
+		d_b[i] = d_imrgba[i].z;
+	}
+	
+	return;
 } 
  
 
@@ -40,7 +50,17 @@ __global__
 void recombineChannels(unsigned char *d_r, unsigned char *d_g, unsigned char *d_b, uchar4 *d_orgba,
         const int rows, const int cols){
 
-
+	int i;
+	int c = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.x * blockDim.x + threadIdx.x;
+	
+	// recombine R,G, and B px values int uchar4
+	if (c < cols && r < rows){
+		i = r * cols + c;
+		d_orgba[i] = make_uchar4(d_r[i], d_g[i], d_b[i], 255);
+	}
+	
+	return;
 } 
 
 
