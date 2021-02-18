@@ -31,3 +31,10 @@
 *.out
 *.app
 gblur
+
+# Output Images
+blurred_gpu.png
+blurred_serial.png
+
+# JupyterHub stuff
+.ipynb_checkpoints

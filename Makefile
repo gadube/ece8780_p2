@@ -20,4 +20,4 @@ blur.o: blur_kernels.cu gaussian_kernel.h  utils.h
 	$(NVCC) -c blur_kernels.cu $(NVCC_OPTS)
 
 clean:
-	rm *.o gblur
+	rm -rf *.o gblur blurred_gpu.png blurred_serial.png
