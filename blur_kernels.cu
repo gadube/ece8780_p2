@@ -1,5 +1,9 @@
 #include "./gaussian_kernel.h" 
 
+#ifndef BLOCK
+#define BLOCK 32
+#endif
+
 /*
 The actual gaussian blur kernel to be implemented by 
 you. Keep in mind that the kernel operates on a 
@@ -8,9 +12,34 @@ single channel.
 __global__ 
 void gaussianBlur(unsigned char *d_in, unsigned char *d_out, 
         const int rows, const int cols, float *d_filter, const int filterWidth){
+	int pixVal;
+	int start_col, start_row;
+	int curr_col, curr_row;
+	int c = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.y * blockDim.y + threadIdx.y;
 
+	if (c < cols && r < rows){
+		pixVal = 0;
+
+		start_col = c - (filterWidth / 2);
+		start_row = r - (filterWidth / 2);
+		
+		for (int i = 0; i < filterWidth; ++i){
+			for (int j = 0; j < filterWidth; ++j){
+				curr_row = start_row + i;
+				curr_col = start_col + j;
+
+				if (curr_row > -1 && curr_row < rows && curr_col > -1 && curr_col < cols){
+					pixVal += d_in[curr_row * cols + curr_col] * d_filter[i * filterWidth + j];
+				}
+			}
+		}
+
+		d_out[r * cols + c] = (unsigned char) pixVal;
+	}
+
+	return;
 } 
-
 
 
 /*
@@ -22,7 +51,7 @@ void separateChannels(uchar4 *d_imrgba, unsigned char *d_r, unsigned char *d_g, 
         const int rows, const int cols){
 	int i;
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
-	int r = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.y * blockDim.y + threadIdx.y;
 
 	// split uchar4 into r, g, b px values
 	if (c < cols && r < rows){
@@ -52,7 +81,7 @@ void recombineChannels(unsigned char *d_r, unsigned char *d_g, unsigned char *d_
 
 	int i;
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
-	int r = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.y * blockDim.y + threadIdx.y;
 	
 	// recombine R,G, and B px values int uchar4
 	if (c < cols && r < rows){
@@ -71,8 +100,8 @@ void your_gauss_blur(uchar4* d_imrgba, uchar4 *d_oimrgba, size_t rows, size_t co
  
 
 
-        dim3 blockSize(1,1,1);
-        dim3 gridSize(1,1,1);
+        dim3 blockSize(BLOCK,BLOCK,1);
+        dim3 gridSize((cols + BLOCK - 1)/BLOCK,(rows + BLOCK - 1)/BLOCK,1);
 
         separateChannels<<<gridSize, blockSize>>>(d_imrgba, d_red, d_green, d_blue, rows, cols);
         cudaDeviceSynchronize();
