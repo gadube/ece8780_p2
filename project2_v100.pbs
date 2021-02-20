@@ -1,0 +1,31 @@
+#PBS -N blurv100
+#PBS -l select=1:ncpus=20:ngpus=1:mem=16gb:gpu_model=v100:interconnect=25ge,walltime=48:00:00
+#PBS -j oe
+#PBS -m ae
+#PBS -q fthpc
+#PBS -M gdube@clemson.edu
+#PBS -o v100_profiling.out
+
+# load modules
+module load opencv/4.2.0-gcc
+module load cuda/11.0.3-gcc
+
+APPHOME='/home/gdube/hpcgpu/ece8780_p2'
+BUILDDIR="$APPHOME/build"
+echo "Changing directories to $APPHOME" && cd $APPHOME 
+
+# run and profile
+for i in {1..10}
+do
+for prog in $(ls build/ |grep 70)
+do
+	for pic in $(ls testimgs/)
+	do
+		echo "Running application: $prog"
+		nvprof $BUILDDIR/$prog ./testimgs/$pic ./blurimgs/blur_gpu_$pic ./blurimgs/blur_ref_$pic
+	done
+done
+done
+
+
+
