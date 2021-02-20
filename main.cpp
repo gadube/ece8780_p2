@@ -11,6 +11,10 @@
 #include "utils.h"
 #include "gaussian_kernel.h"
 
+using namespace std::chrono;
+
+high_resolution_clock::time_point now = high_resolution_clock::now();
+#define TIME duration_cast<duration<double>>(high_resolution_clock::now() - now).count()
 
 /* 
  * Compute if the two images are correctly 
@@ -94,7 +98,7 @@ void serialGaussianBlur(unsigned char *in, unsigned char *out, const int rows, c
 			for (i = 0; i < filterWidth; i++){
 				for (j = 0; j < filterWidth; j++){
 					curr_row = start_row + i;
-					curr_col = start_col + i;
+					curr_col = start_col + j;
 
 					// compute partial sum of px value if within bounds
 					if (curr_row > -1 && curr_row < rows && curr_col > -1 && curr_col < cols){
@@ -238,7 +242,7 @@ int main(int argc, char const *argv[]) {
     h_filter = new float[fWidth*fWidth];
     gaussian_blur_filter(h_filter, fWidth, fDev); // create a filter of 9x9 with std_dev = 0.2  
 
-    printArray<float>(h_filter, 81); // printUtility.
+    //printArray<float>(h_filter, 81); // printUtility.
 
     // copy the image and filter over to GPU here 
 		checkCudaErrors(cudaMemcpy(d_in_img, h_in_img, sizeof(uchar4) * numPixels, cudaMemcpyHostToDevice));
@@ -267,15 +271,62 @@ int main(int argc, char const *argv[]) {
 		r_o_img = (uchar4 *)malloc(sizeof(uchar4) * numPixels);
 
 		// perform separation, blur, and recombine
+		int mu_s = 1000000;
+		now = high_resolution_clock::now();
 		serialSeparateChannels(h_in_img, h_red, h_green, h_blue, img.rows, img.cols);
+		double sep_ch_time = TIME * mu_s;
 
+		now = high_resolution_clock::now();
 		serialGaussianBlur(h_red, h_blurred_red, img.rows, img.cols, h_filter, fWidth);		
+		double gblur1_time = TIME * mu_s;
+		now = high_resolution_clock::now();
 		serialGaussianBlur(h_green, h_blurred_green, img.rows, img.cols, h_filter, fWidth);		
+		double gblur2_time = TIME * mu_s;
+		now = high_resolution_clock::now();
 		serialGaussianBlur(h_blue, h_blurred_blue, img.rows, img.cols, h_filter, fWidth);		
+		double gblur3_time = TIME * mu_s;
 
+		now = high_resolution_clock::now();
 		serialRecombineChannels(h_blurred_red, h_blurred_green, h_blurred_blue, r_o_img, img.rows, img.cols);
-
+		double comb_ch_time = TIME * mu_s;
 		
+		// print timings
+		std::cout << "Time\t\tFunction Call" << std::endl;
+		if (sep_ch_time < 1000)
+			std::cout << std::setprecision(5) << sep_ch_time << " \u03BCs\tserialSeparateChannels" << std::endl; 
+		else if (sep_ch_time > 1000 && sep_ch_time < 1000000)
+			std::cout << std::setprecision(5) << sep_ch_time / 1000 << " ms\tserialSeparateChannels" << std::endl; 
+		else
+			std::cout << std::setprecision(5) << sep_ch_time / 1000000 << " s\tserialSeparateChannels" << std::endl; 
+
+		if (gblur1_time < 1000)
+			std::cout << std::setprecision(5) << gblur1_time << " \u03BCs\tserialGaussianBlur" << std::endl; 
+		else if (gblur1_time > 1000 && gblur1_time < 1000000)
+			std::cout << std::setprecision(5) << gblur1_time / 1000 << " ms\tserialGaussianBlur" << std::endl; 
+		else
+			std::cout << std::setprecision(5) << gblur1_time / 1000000 << " s\tserialGaussianBlur" << std::endl; 
+
+		if (gblur2_time < 1000)
+			std::cout << std::setprecision(5) << gblur2_time << " \u03BCs\tserialGaussianBlur" << std::endl; 
+		else if (gblur2_time > 1000 && gblur2_time < 1000000)
+			std::cout << std::setprecision(5) << gblur2_time / 1000 << " ms\tserialGaussianBlur" << std::endl; 
+		else
+			std::cout << std::setprecision(5) << gblur2_time / 1000000 << " s\tserialGaussianBlur" << std::endl; 
+
+		if (gblur3_time < 1000)
+			std::cout << std::setprecision(5) << gblur3_time << " \u03BCs\tserialGaussianBlur" << std::endl; 
+		else if (gblur3_time > 1000 && gblur2_time < 1000000)
+			std::cout << std::setprecision(5) << gblur3_time / 1000 << " ms\tserialGaussianBlur" << std::endl; 
+		else
+			std::cout << std::setprecision(5) << gblur3_time / 1000000 << " s\tserialGaussianBlur" << std::endl; 
+
+		if (comb_ch_time < 1000)
+			std::cout << std::setprecision(5) << comb_ch_time << " \u03BCs\tserialRecombineChannels" << std::endl; 
+		else if (comb_ch_time > 1000 && comb_ch_time < 1000000)
+			std::cout << std::setprecision(5) << comb_ch_time / 1000 << " ms\tserialRecombineChannels" << std::endl; 
+		else
+			std::cout << std::setprecision(5) << comb_ch_time / 1000000 << " s\tserialRecombineChannels" << std::endl; 
+  		
     // create the image with the output data 
     cv::Mat output(img.rows, img.cols, CV_8UC4, (void*)h_o_img); // generate GPU output image.
     bool suc = cv::imwrite(outfile.c_str(), output);
@@ -295,7 +346,7 @@ int main(int argc, char const *argv[]) {
 
     // check if the caclulation was correct to a degree of tolerance
 
-    //checkResult(reference, outfile, 1e-5);
+    checkResult(reference, outfile, 1e-5);
 
     // free any necessary memory.
 		free(h_red);
