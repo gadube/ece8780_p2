@@ -6,9 +6,10 @@
 
 ## Compilation (on Clemson's Palmetto cluster):
 ### Basic Compilation:
-`> source envvars.sh # add required modules`
-
-`> make              # create executable`
+```
+> source envvars.sh # add required modules
+> make              # create executable
+```
 
 ### Compilation for PBS Scripts:
 `> source envvars.sh # add required modules`
