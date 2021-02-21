@@ -12,13 +12,18 @@
 ```
 
 ### Compilation for PBS Scripts:
-`> source envvars.sh # add required modules`
-
-`> sh compileall.sh  # compile executables for K20, P100 and V100 GPUs`
+```
+> source envvars.sh # add required modules
+> sh compileall.sh  # compile executables for K20, P100 and V100 GPUs
+```
 
 ## To Run:
 ### Basic Run:
-`> ./gblur <inputimage> <gpu_outputimage> <serial_outputimage>`
+```
+> ./gblur <inputimage> <gpu_outputimage> <serial_outputimage>
+```
 
 ### Profiling Run:
-`> qsub project2_<gpu_type>.pbs`
+```
+> qsub project2_<gpu_type>.pbs
+```
