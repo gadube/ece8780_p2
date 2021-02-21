@@ -7,10 +7,12 @@
 ## Compilation (on Clemson's Palmetto cluster):
 ### Basic Compilation:
 `> source envvars.sh # add required modules`
+
 `> make              # create executable`
 
 ### Compilation for PBS Scripts:
 `> source envvars.sh # add required modules`
+
 `> sh compileall.sh  # compile executables for K20, P100 and V100 GPUs`
 
 ## To Run:
