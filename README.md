@@ -4,8 +4,8 @@
 - It performs both serial and CUDA versions of this operation and compares the outputs for correctness.
 - This project uses gcc 8.3.1, CUDA 11.0.2, and OpenCV 4.2.0
 
-##### Main Project Branch: `main`
-##### Hackathon 2 Branch:  `hack`
+#### Main Project Branch: `main`
+#### Hackathon 2 Branch:  `hack`
 
 ## Compilation (on Clemson's Palmetto cluster):
 ### Basic Compilation:
