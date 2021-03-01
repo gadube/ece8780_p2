@@ -1,6 +1,8 @@
 #include "./gaussian_kernel.h" 
 #include "device_launch_parameters.h"
 
+#define BLOCK 32
+
 ///
 /// The kernel function for image filtering using constant and shared memory
 /// Note that passing references cannot be used.
@@ -182,11 +184,11 @@ void gaussianBlur_col_separable(unsigned char *d_in, unsigned char *d_out,
         const int rows, const int cols, float *d_filter, const int filter_width){
 
 	int pixVal;
-	int current_col;
-	int j = blockIdx.x * blockDim.x + threadIdx.x;
+	int current_row;
 	int i = blockIdx.y * blockDim.y + threadIdx.y;
+	int j = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (j < cols && i < rows){
+	if (j < cols){
 		// Reset parameters
 		pixVal = 0;
 
@@ -194,17 +196,17 @@ void gaussianBlur_col_separable(unsigned char *d_in, unsigned char *d_out,
 		for (int blur_c = -(filter_width / 2); blur_c <= (filter_width / 2); blur_c++) {
 
 			// Calculate the index of the current row and that of the current column
-			current_col = i + blur_c;
+			current_row = i + blur_c;
 
 			// Boundary check
-			if ((current_col >= 0) && (current_col < rows)) {
-				pixVal += d_in[current_col*cols + j]*d_filter[(filter_width / 2) - blur_c];
+			if ((current_row >= 0) && (current_row < rows)) {
+				pixVal += d_in[current_row*cols + j]*d_filter[(filter_width / 2) - blur_c];
 			}
 		}
 	
 		// Save the result
-		//d_out[i*cols + j] = (unsigned char)(pixVal);
-		d_out[i*cols + j] = d_in[i*cols + j];
+		d_out[i*cols + j] = (unsigned char)(pixVal);
+		//d_out[i*cols + j] = d_in[i*cols + j];
 
 	}	
 	return;
@@ -215,11 +217,11 @@ void gaussianBlur_row_separable(unsigned char *d_in, unsigned char *d_out,
         const int rows, const int cols, float *d_filter, const int filter_width){
 
 	int pixVal;
-	int current_row;
+	int current_col;
 	int i = blockIdx.y * blockDim.y + threadIdx.y;
 	int j = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (j < cols && i < rows){
+	if (i < rows){
 
 		// Reset parameters
 		pixVal = 0;
@@ -228,16 +230,15 @@ void gaussianBlur_row_separable(unsigned char *d_in, unsigned char *d_out,
 		for (int blur_r = -(filter_width / 2); blur_r <= (filter_width / 2); blur_r++) {
 
 		// Calculate the index of the current row and that of the current column
-			current_row = j + blur_r;
+			current_col = j + blur_r;
 
 			// Boundary check
-			if ((current_row >= 0) && (current_row < cols)) {
-				pixVal += d_in[i*cols + current_row]*d_filter[(filter_width / 2) - blur_r];
+			if ((current_col >= 0) && (current_col < cols)) {
+				pixVal += d_in[i*cols + current_col]*d_filter[(filter_width / 2) - blur_r];
 			}
 		}
 
-		//d_out[i * cols + j] = (unsigned char) pixVal;
-		d_out[i*cols + j] = d_in[i*cols + j];
+		d_out[i * cols + j] = (unsigned char) pixVal;
 	}
 
 	return;
@@ -303,7 +304,7 @@ void separable_gauss_blur(uchar4* d_imrgba, uchar4 *d_oimrgba, size_t rows, size
         float *d_row_filter, float *d_col_filter,  int filterWidth){
 
         dim3 blockSize(BLOCK,BLOCK,1);
-        dim3 gridSize((cols)/BLOCK,(rows)/BLOCK,1);
+        dim3 gridSize((cols + BLOCK - 1)/BLOCK,(rows + BLOCK - 1)/BLOCK,1);
 
         separateChannels<<<gridSize, blockSize>>>(d_imrgba, d_red, d_green, d_blue, rows, cols);
         cudaDeviceSynchronize();

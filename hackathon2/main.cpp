@@ -403,7 +403,7 @@ int main(int argc, char const *argv[]) {
 //		d_red,d_green,d_blue,d_red_blurred,d_green_blurred,d_blue_blurred);
 
 	// (GPU) separable kernel launch 
-	separable_gauss_blur(d_in_img,d_o_img,img.cols,img.rows,d_red,d_green,d_blue \
+	separable_gauss_blur(d_in_img,d_o_img,img.rows,img.cols,d_red,d_green,d_blue \
 			,d_red_blurred,d_green_blurred,d_blue_blurred, d_row_filter, d_col_filter, fWidth);
 
 	//// (GPU) Copy the data from device to host
