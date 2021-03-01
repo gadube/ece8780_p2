@@ -307,11 +307,13 @@ int main(int argc, char const *argv[]) {
    
     uchar4 *h_in_img, *h_o_img, *r_o_img; // pointers to the actual image input and output pointers  
     uchar4 *d_in_img, *d_o_img;
+    uchar4 *d_sep_in_img;
 
     unsigned char *h_red, *h_blue, *h_green; 
 	unsigned char *h_red_blurred, *h_green_blurred, *h_blue_blurred;
     unsigned char *d_red, *d_blue, *d_green;   
     unsigned char *d_red_blurred, *d_green_blurred, *d_blue_blurred;   
+    unsigned char *d_sep_red, *d_sep_blue, *d_sep_green;   
 
     float *h_filter, *d_filter;  
     float *h_col_filter, *d_col_filter;  
@@ -385,6 +387,11 @@ int main(int argc, char const *argv[]) {
 	checkCudaErrors(cudaMalloc((void**)&d_blue_blurred, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_o_img, sizeof(uchar4)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_filter, sizeof(float)*numFilterParam));
+
+	checkCudaErrors(cudaMalloc((void**)&d_sep_in_img, sizeof(uchar4)*numPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_sep_red, sizeof(unsigned char)*numPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_sep_green, sizeof(unsigned char)*numPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_sep_blue, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_row_filter, sizeof(float)*fWidth));
 	checkCudaErrors(cudaMalloc((void**)&d_col_filter, sizeof(float)*fWidth));
 
@@ -394,16 +401,21 @@ int main(int argc, char const *argv[]) {
 
 	// (GPU) Copy the data from host to device
 	checkCudaErrors(cudaMemcpy(d_in_img, h_paddedImage, sizeof(uchar4)*numPaddedPixels, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_sep_in_img, h_in_img, sizeof(uchar4)*numPixels, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_filter, h_filter, sizeof(float)*numFilterParam, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_row_filter, h_row_filter, sizeof(float)*fWidth, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_col_filter, h_col_filter, sizeof(float)*fWidth, cudaMemcpyHostToDevice));
 
-	// (GPU) kernel launch code 
-//	gauss_blur_shared_mem(d_in_img,paddedIWidth,paddedIHeight,d_filter, fWidth,d_o_img,(img.cols),(img.rows),
-//		d_red,d_green,d_blue,d_red_blurred,d_green_blurred,d_blue_blurred);
+	// (GPU) shared kernel launch code 
+	gauss_blur_shared_mem(d_in_img,paddedIWidth,paddedIHeight,d_filter, fWidth,d_o_img,(img.cols),(img.rows),
+		d_red,d_green,d_blue,d_red_blurred,d_green_blurred,d_blue_blurred);
+
+	  //original kernel
+		original_gauss_blur(d_sep_in_img,d_o_img,img.rows,img.cols,d_sep_red,d_sep_green,d_sep_blue \
+			,d_red_blurred,d_green_blurred,d_blue_blurred, d_filter, fWidth);
 
 	// (GPU) separable kernel launch 
-	separable_gauss_blur(d_in_img,d_o_img,img.rows,img.cols,d_red,d_green,d_blue \
+	separable_gauss_blur(d_sep_in_img,d_o_img,img.rows,img.cols,d_sep_red,d_sep_green,d_sep_blue \
 			,d_red_blurred,d_green_blurred,d_blue_blurred, d_row_filter, d_col_filter, fWidth);
 
 	//// (GPU) Copy the data from device to host

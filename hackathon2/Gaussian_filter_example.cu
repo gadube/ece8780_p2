@@ -178,6 +178,38 @@ The actual gaussian blur kernel to be implemented by
 you. Keep in mind that the kernel operates on a 
 single channel.
  */
+__global__ 
+void gaussianBlur(unsigned char *d_in, unsigned char *d_out, 
+        const int rows, const int cols, float *d_filter, const int filterWidth){
+	int pixVal;
+	int start_col, start_row;
+	int curr_col, curr_row;
+	int c = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (c < cols && r < rows){
+		pixVal = 0;
+
+		start_col = c - (filterWidth / 2);
+		start_row = r - (filterWidth / 2);
+		
+		for (int i = 0; i < filterWidth; ++i){
+			for (int j = 0; j < filterWidth; ++j){
+				curr_row = start_row + i;
+				curr_col = start_col + j;
+
+				if (curr_row > -1 && curr_row < rows && curr_col > -1 && curr_col < cols){
+					pixVal += d_in[curr_row * cols + curr_col] * d_filter[i * filterWidth + j];
+				}
+			}
+		}
+
+		d_out[r * cols + c] = (unsigned char) pixVal;
+	}
+
+	return;
+} 
+
 
 __global__ 
 void gaussianBlur_col_separable(unsigned char *d_in, unsigned char *d_out, 
@@ -188,7 +220,7 @@ void gaussianBlur_col_separable(unsigned char *d_in, unsigned char *d_out,
 	int i = blockIdx.y * blockDim.y + threadIdx.y;
 	int j = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (j < cols){
+	if (j < cols && i < rows){
 		// Reset parameters
 		pixVal = 0;
 
@@ -221,7 +253,7 @@ void gaussianBlur_row_separable(unsigned char *d_in, unsigned char *d_out,
 	int i = blockIdx.y * blockDim.y + threadIdx.y;
 	int j = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (i < rows){
+	if (i < rows && j < cols){
 
 		// Reset parameters
 		pixVal = 0;
@@ -338,6 +370,39 @@ void separable_gauss_blur(uchar4* d_imrgba, uchar4 *d_oimrgba, size_t rows, size
         checkCudaErrors(cudaGetLastError());
 
         recombineChannels<<<gridSize, blockSize>>>(d_red, d_green, d_blue, d_oimrgba, rows, cols);
+
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());   
+
+}
+
+void original_gauss_blur(uchar4* d_imrgba, uchar4 *d_oimrgba, size_t rows, size_t cols, 
+        unsigned char *d_red, unsigned char *d_green, unsigned char *d_blue, 
+        unsigned char *d_rblurred, unsigned char *d_gblurred, unsigned char *d_bblurred,
+        float *d_filter,  int filterWidth){
+ 
+
+
+        dim3 blockSize(BLOCK,BLOCK,1);
+        dim3 gridSize((cols + BLOCK - 1)/BLOCK + 1,(rows + BLOCK - 1)/BLOCK + 1,1);
+
+        separateChannels<<<gridSize, blockSize>>>(d_imrgba, d_red, d_green, d_blue, rows, cols);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        gaussianBlur<<<gridSize, blockSize>>>(d_red, d_rblurred, rows, cols, d_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        gaussianBlur<<<gridSize, blockSize>>>(d_green, d_gblurred, rows, cols, d_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        gaussianBlur<<<gridSize, blockSize>>>(d_blue, d_bblurred, rows, cols, d_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        recombineChannels<<<gridSize, blockSize>>>(d_rblurred, d_gblurred, d_bblurred, d_oimrgba, rows, cols);
 
         cudaDeviceSynchronize();
         checkCudaErrors(cudaGetLastError());   
