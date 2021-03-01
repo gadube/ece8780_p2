@@ -21,7 +21,7 @@
  * */
 void checkApproxResults(unsigned char *ref, unsigned char *gpu, size_t numElems){
 
-    for(int i = 0; i < numElems; i++){
+    for(size_t i = 0; i < numElems; i++){
         if(ref[i] - gpu[i] > 1e-5){
             std::cerr << "Error at position " << i << "\n"; 
 
@@ -54,7 +54,7 @@ void checkResult(const std::string &reference_file, const std::string &output_fi
 // Pad the image apron
 template <typename T>
 int replicationPadding(T *image, const unsigned int &iWidth, const unsigned int &iHeight,
-	const int &hFilterSize,
+	const unsigned int &hFilterSize,
 	T *paddedImage, const unsigned int &paddedIWidth, const unsigned int &paddedIHeight)
 {
 
@@ -68,7 +68,7 @@ int replicationPadding(T *image, const unsigned int &iWidth, const unsigned int 
 			unsigned int extendedPixelPos = i * paddedIWidth + j;
 
 			// Set the pixel position of the input image
-			unsigned int pixelPos;
+			unsigned int pixelPos = 0;
 			if (j >= 0 && j < hFilterSize &&
 				i >= 0 && i < hFilterSize) { // (The top left corner)
 				pixelPos = 0;
@@ -138,6 +138,41 @@ void gaussian_blur_filter(float *arr, const int f_sz, const float f_sigma=0.2){
     }
 }
 
+// f_sz is the dimension of the kernel
+void gaussian_blur_row_filter(float *arr, const int f_sz, const float f_sigma=0.2){ 
+    float filterSum = 0.f;
+    float norm_const = 0.0; // normalization const for the kernel 
+
+    for(int r = -f_sz/2; r <= f_sz/2; r++){
+            float fSum = expf(-(float)(r*r)/(2*f_sigma*f_sigma)); 
+            arr[(r+f_sz/2)] = fSum; 
+            filterSum  += fSum;
+    } 
+
+    norm_const = 1.f/filterSum; 
+
+    for(int r = -f_sz/2; r <= f_sz/2; ++r){
+            arr[(r+f_sz/2)] *= norm_const;
+    }
+}
+
+// f_sz is the dimension of the kernel
+void gaussian_blur_col_filter(float *arr, const int f_sz, const float f_sigma=0.2){ 
+    float filterSum = 0.f;
+    float norm_const = 0.0; // normalization const for the kernel 
+
+    for(int c = -f_sz/2; c <= f_sz/2; c++){
+            float fSum = expf(-(float)(c*c)/(2*f_sigma*f_sigma)); 
+            arr[(c+f_sz/2)] = fSum; 
+            filterSum  += fSum;
+    } 
+
+    norm_const = 1.f/filterSum; 
+
+    for(int c = -f_sz/2; c <= f_sz/2; ++c){
+            arr[(c+f_sz/2)] *= norm_const;
+    }
+}
 
 // Serial implementations of kernel functions
 void serialGaussianBlur(unsigned char *in, unsigned char *out, const int rows, const int cols, 
@@ -173,9 +208,71 @@ void serialGaussianBlur(unsigned char *in, unsigned char *out, const int rows, c
 			out[i*cols + j] = (unsigned char)(pixVal);
 		}
 	}
-
-
 } 
+
+// Serial implementations of kernel functions
+void serialGaussianBlur_row(unsigned char *in, unsigned char *out, const int rows, const int cols, 
+    float *filter, const int filterWidth){
+
+	int current_row = 0;
+	float pixVal = 0;
+
+	// Go through the whole image
+	for (int i = 0; i < rows; i++) {
+		for (int j = 0; j < cols; j++) {
+
+			// Reset parameters
+			pixVal = 0;
+
+			// Obtain pixels right under the kernel
+			for (int blur_r = -(filterWidth / 2); blur_r <= (filterWidth / 2); blur_r++) {
+
+				// Calculate the index of the current row and that of the current column
+				current_row = j + blur_r;
+
+				// Boundary check
+				if ((current_row >= 0) && (current_row < cols)) {
+					pixVal += in[i*cols + current_row]*filter[(filterWidth / 2) - blur_r];
+				}
+			}
+
+			// Save the result
+			out[i*cols + j] = (unsigned char)(pixVal);
+		}
+	}
+} 
+
+// Serial implementations of kernel functions
+void serialGaussianBlur_col(unsigned char *in, unsigned char *out, const int rows, const int cols, 
+    float *filter, const int filterWidth){
+
+	int current_col = 0;
+	float pixVal = 0;
+
+	// Go through the whole image
+	for (int i = 0; i < rows; i++) {
+		for (int j = 0; j < cols; j++) {
+
+			// Reset parameters
+			pixVal = 0;
+
+			// Obtain pixels right under the kernel
+			for (int blur_c = -(filterWidth / 2); blur_c <= (filterWidth / 2); blur_c++) {
+
+				// Calculate the index of the current row and that of the current column
+				current_col = i + blur_c;
+
+				// Boundary check
+				if ((current_col >= 0) && (current_col < rows)) {
+					pixVal += in[current_col*cols + j]*filter[(filterWidth / 2) - blur_c];
+				}
+			}
+		
+			// Save the result
+			out[i*cols + j] = (unsigned char)(pixVal);
+		}
+	}
+}
 
 void serialSeparateChannels(uchar4 *imrgba, unsigned char *r, unsigned char *g, unsigned char *b,
     const int rows, const int cols){
@@ -217,6 +314,8 @@ int main(int argc, char const *argv[]) {
     unsigned char *d_red_blurred, *d_green_blurred, *d_blue_blurred;   
 
     float *h_filter, *d_filter;  
+    float *h_col_filter, *d_col_filter;  
+    float *h_row_filter, *d_row_filter;  
     cv::Mat imrgba, o_img, output_gpu_final, reference_image; 
 
     const int fWidth = 9; 
@@ -244,10 +343,16 @@ int main(int argc, char const *argv[]) {
 
 	// filter allocation 
 	h_filter = new float[fWidth*fWidth];
+	h_row_filter = new float[fWidth];
+	h_col_filter = new float[fWidth];
 	gaussian_blur_filter(h_filter, fWidth, float(fDev)); // create a filter of 9x9 with std_dev = 2  
+	gaussian_blur_row_filter(h_row_filter, fWidth, float(fDev)); // create a filter of 9x9 with std_dev = 2  
+	gaussian_blur_col_filter(h_col_filter, fWidth, float(fDev)); // create a filter of 9x9 with std_dev = 2  
 
 	// Print the parameters within the filter
 	printArray<float>(h_filter, 81); // printUtility.
+	printArray<float>(h_filter, 9); // printUtility.
+	printArray<float>(h_filter, 9); // printUtility.
 
 	// Create an apron for the input image
 	unsigned int paddedIWidth = img.cols + 2 * 4;
@@ -280,6 +385,8 @@ int main(int argc, char const *argv[]) {
 	checkCudaErrors(cudaMalloc((void**)&d_blue_blurred, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_o_img, sizeof(uchar4)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_filter, sizeof(float)*numFilterParam));
+	checkCudaErrors(cudaMalloc((void**)&d_row_filter, sizeof(float)*fWidth));
+	checkCudaErrors(cudaMalloc((void**)&d_col_filter, sizeof(float)*fWidth));
 
 	// (GPU) Create a matrix to store the output image from GPU
 	o_img.create(img.rows, img.cols, CV_8UC4);
@@ -288,10 +395,16 @@ int main(int argc, char const *argv[]) {
 	// (GPU) Copy the data from host to device
 	checkCudaErrors(cudaMemcpy(d_in_img, h_paddedImage, sizeof(uchar4)*numPaddedPixels, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_filter, h_filter, sizeof(float)*numFilterParam, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_row_filter, h_row_filter, sizeof(float)*fWidth, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_col_filter, h_col_filter, sizeof(float)*fWidth, cudaMemcpyHostToDevice));
 
 	// (GPU) kernel launch code 
-	gauss_blur_shared_mem(d_in_img,paddedIWidth,paddedIHeight,d_filter, fWidth,d_o_img,(img.cols),(img.rows),
-		d_red,d_green,d_blue,d_red_blurred,d_green_blurred,d_blue_blurred);
+//	gauss_blur_shared_mem(d_in_img,paddedIWidth,paddedIHeight,d_filter, fWidth,d_o_img,(img.cols),(img.rows),
+//		d_red,d_green,d_blue,d_red_blurred,d_green_blurred,d_blue_blurred);
+
+	// (GPU) separable kernel launch 
+	separable_gauss_blur(d_in_img,d_o_img,img.cols,img.rows,d_red,d_green,d_blue \
+			,d_red_blurred,d_green_blurred,d_blue_blurred, d_row_filter, d_col_filter, fWidth);
 
 	//// (GPU) Copy the data from device to host
 	checkCudaErrors(cudaMemcpy(h_o_img, d_o_img, numPixels * sizeof(uchar4), cudaMemcpyDeviceToHost));
@@ -349,13 +462,16 @@ int main(int argc, char const *argv[]) {
 	//cv::waitKey(0);
 
 	// (Serial) Apply Gaussian blur to the r channel
-	serialGaussianBlur(h_red, h_red_blurred, img.rows, img.cols, h_filter, fWidth);
+	serialGaussianBlur_row(h_red, h_red_blurred, img.rows, img.cols, h_row_filter, fWidth);
+	serialGaussianBlur_col(h_red_blurred, h_red, img.rows, img.cols, h_col_filter, fWidth);
 
 	// (Serial) Apply Gaussian blur to the g channel
-	serialGaussianBlur(h_green, h_green_blurred, img.rows, img.cols, h_filter, fWidth);
+	serialGaussianBlur_row(h_green, h_green_blurred, img.rows, img.cols, h_row_filter, fWidth);
+	serialGaussianBlur_col(h_green_blurred, h_green, img.rows, img.cols, h_col_filter, fWidth);
 
 	// (Serial) Apply Gaussian blur to the b channel
-	serialGaussianBlur(h_blue, h_blue_blurred, img.rows, img.cols, h_filter, fWidth);
+	serialGaussianBlur_row(h_blue, h_blue_blurred, img.rows, img.cols, h_row_filter, fWidth);
+	serialGaussianBlur_col(h_blue_blurred, h_blue, img.rows, img.cols, h_col_filter, fWidth);
 
 	//// test
 	//cv::Mat test_single(img.rows, img.cols, CV_8UC1, h_red_blurred); 
@@ -372,7 +488,7 @@ int main(int argc, char const *argv[]) {
 	//cv::waitKey(0);
 
 	// (Serial) Combine the channels to a image
-	serialRecombineChannels(h_red_blurred, h_green_blurred, h_blue_blurred, r_o_img, img.rows, img.cols);
+	serialRecombineChannels(h_red, h_green, h_blue, r_o_img, img.rows, img.cols);
 
 	// (Serial) Record the end time. 
 	end_time = std::chrono::high_resolution_clock::now();

@@ -170,6 +170,79 @@ void recombineChannels(unsigned char *d_r, unsigned char *d_g, unsigned char *d_
 	}
 } 
 
+
+/*
+The actual gaussian blur kernel to be implemented by 
+you. Keep in mind that the kernel operates on a 
+single channel.
+ */
+
+__global__ 
+void gaussianBlur_col_separable(unsigned char *d_in, unsigned char *d_out, 
+        const int rows, const int cols, float *d_filter, const int filter_width){
+
+	int pixVal;
+	int current_col;
+	int j = blockIdx.x * blockDim.x + threadIdx.x;
+	int i = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (j < cols && i < rows){
+		// Reset parameters
+		pixVal = 0;
+
+		// Obtain pixels right under the kernel
+		for (int blur_c = -(filter_width / 2); blur_c <= (filter_width / 2); blur_c++) {
+
+			// Calculate the index of the current row and that of the current column
+			current_col = i + blur_c;
+
+			// Boundary check
+			if ((current_col >= 0) && (current_col < rows)) {
+				pixVal += d_in[current_col*cols + j]*d_filter[(filter_width / 2) - blur_c];
+			}
+		}
+	
+		// Save the result
+		//d_out[i*cols + j] = (unsigned char)(pixVal);
+		d_out[i*cols + j] = d_in[i*cols + j];
+
+	}	
+	return;
+} 
+
+__global__ 
+void gaussianBlur_row_separable(unsigned char *d_in, unsigned char *d_out, 
+        const int rows, const int cols, float *d_filter, const int filter_width){
+
+	int pixVal;
+	int current_row;
+	int i = blockIdx.y * blockDim.y + threadIdx.y;
+	int j = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (j < cols && i < rows){
+
+		// Reset parameters
+		pixVal = 0;
+
+		// Obtain pixels right under the kernel
+		for (int blur_r = -(filter_width / 2); blur_r <= (filter_width / 2); blur_r++) {
+
+		// Calculate the index of the current row and that of the current column
+			current_row = j + blur_r;
+
+			// Boundary check
+			if ((current_row >= 0) && (current_row < cols)) {
+				pixVal += d_in[i*cols + current_row]*d_filter[(filter_width / 2) - blur_r];
+			}
+		}
+
+		//d_out[i * cols + j] = (unsigned char) pixVal;
+		d_out[i*cols + j] = d_in[i*cols + j];
+	}
+
+	return;
+} 
+
 void gauss_blur_shared_mem(uchar4 *d_padded_image, int padded_width, int padded_height,
 	float *d_filter, int filter_width, uchar4 *d_filterred_result, int img_width, int img_height,
 	unsigned char *d_red, unsigned char *d_green, unsigned char *d_blue,
@@ -222,4 +295,50 @@ void gauss_blur_shared_mem(uchar4 *d_padded_image, int padded_width, int padded_
 	recombineChannels << <gridSize_recombine, blockSize_recombine >> >(d_rblurred, d_gblurred, d_bblurred, d_filterred_result, int(img_height), int(img_width));
 	cudaDeviceSynchronize();
 	checkCudaErrors(cudaGetLastError());
+}
+
+void separable_gauss_blur(uchar4* d_imrgba, uchar4 *d_oimrgba, size_t rows, size_t cols, 
+        unsigned char *d_red, unsigned char *d_green, unsigned char *d_blue, 
+        unsigned char *d_rblurred, unsigned char *d_gblurred, unsigned char *d_bblurred,
+        float *d_row_filter, float *d_col_filter,  int filterWidth){
+
+        dim3 blockSize(BLOCK,BLOCK,1);
+        dim3 gridSize((cols)/BLOCK,(rows)/BLOCK,1);
+
+        separateChannels<<<gridSize, blockSize>>>(d_imrgba, d_red, d_green, d_blue, rows, cols);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+				//blur red channel
+        gaussianBlur_col_separable<<<gridSize, blockSize>>>(d_red, d_rblurred, rows, cols, d_col_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        gaussianBlur_row_separable<<<gridSize, blockSize>>>(d_rblurred, d_red, rows, cols, d_row_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+				//blur green channel
+        gaussianBlur_col_separable<<<gridSize, blockSize>>>(d_green, d_gblurred, rows, cols, d_col_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        gaussianBlur_row_separable<<<gridSize, blockSize>>>(d_gblurred, d_green, rows, cols, d_row_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+				//blur blue channel
+        gaussianBlur_col_separable<<<gridSize, blockSize>>>(d_blue, d_bblurred, rows, cols, d_col_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        gaussianBlur_row_separable<<<gridSize, blockSize>>>(d_bblurred, d_blue, rows, cols, d_row_filter, filterWidth);
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());
+
+        recombineChannels<<<gridSize, blockSize>>>(d_red, d_green, d_blue, d_oimrgba, rows, cols);
+
+        cudaDeviceSynchronize();
+        checkCudaErrors(cudaGetLastError());   
+
 }
