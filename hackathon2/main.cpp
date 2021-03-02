@@ -51,71 +51,6 @@ void checkResult(const std::string &reference_file, const std::string &output_fi
 
 }
 
-// Pad the image apron
-template <typename T>
-int replicationPadding(T *image, const unsigned int &iWidth, const unsigned int &iHeight,
-	const unsigned int &hFilterSize,
-	T *paddedImage, const unsigned int &paddedIWidth, const unsigned int &paddedIHeight)
-{
-
-	//
-	// Perform extended padding
-	//
-	for (unsigned int i = 0; i < paddedIHeight; i++) {
-		for (unsigned int j = 0; j < paddedIWidth; j++) {
-
-			// Set the pixel position of the extended image
-			unsigned int extendedPixelPos = i * paddedIWidth + j;
-
-			// Set the pixel position of the input image
-			unsigned int pixelPos = 0;
-			if (j >= 0 && j < hFilterSize &&
-				i >= 0 && i < hFilterSize) { // (The top left corner)
-				pixelPos = 0;
-			}
-			else if (j >= hFilterSize && j < iWidth + hFilterSize &&
-				i >= 0 && i < hFilterSize) { // (The top padded area)
-				pixelPos = j - hFilterSize;
-			}
-			else if (j >= iWidth + hFilterSize && j < iWidth + 2 * hFilterSize &&
-				i >= 0 && i < hFilterSize) { // (The top right corner)
-				pixelPos = iWidth - 1;
-			}
-			else if (j >= 0 && j < hFilterSize &&
-				i >= hFilterSize && i < iHeight + hFilterSize) { // (The left padded area)
-				pixelPos = (i - hFilterSize) * iWidth;
-			}
-			else if (j >= hFilterSize && j < iWidth + hFilterSize &&
-				i >= hFilterSize && i < iHeight + hFilterSize) { // (The original image)
-				pixelPos = (i - hFilterSize) * iWidth + (j - hFilterSize);
-			}
-			else if (j >= iWidth + hFilterSize && j < iWidth + 2 * hFilterSize &&
-				i >= hFilterSize && i < iHeight + hFilterSize) { // (The right padded area)
-				pixelPos = (i - hFilterSize) * iWidth + (iWidth - 1);
-			}
-			else if (j >= 0 && j < hFilterSize &&
-				i >= iHeight + hFilterSize && i < iHeight + 2 * hFilterSize) { // (The bottom left corner)
-				pixelPos = (iHeight - 1) * iWidth;
-			}
-			else if (j >= hFilterSize && j < iWidth + hFilterSize &&
-				i >= iHeight + hFilterSize && i < iHeight + 2 * hFilterSize) { // (The bottom padded area)
-				pixelPos = (iHeight - 1) * iWidth + (j - hFilterSize);
-			}
-			else if (j >= iWidth + hFilterSize && j < iWidth + 2 * hFilterSize &&
-				i >= iHeight + hFilterSize && i < iHeight + 2 * hFilterSize) { // (The bottom right corner)
-				pixelPos = (iHeight - 1) * iWidth + (iWidth - 1);
-			}
-
-			// Copy the pixel value
-			paddedImage[extendedPixelPos] = image[pixelPos];
-
-		}
-	}
-
-	return 0;
-
-}
-
 // f_sz is the dimension of the kernel
 void gaussian_blur_filter(float *arr, const int f_sz, const float f_sigma=0.2){ 
     float filterSum = 0.f;
@@ -307,13 +242,11 @@ int main(int argc, char const *argv[]) {
    
     uchar4 *h_in_img, *h_o_img, *r_o_img; // pointers to the actual image input and output pointers  
     uchar4 *d_in_img, *d_o_img;
-    uchar4 *d_sep_in_img;
 
     unsigned char *h_red, *h_blue, *h_green; 
 	unsigned char *h_red_blurred, *h_green_blurred, *h_blue_blurred;
     unsigned char *d_red, *d_blue, *d_green;   
     unsigned char *d_red_blurred, *d_green_blurred, *d_blue_blurred;   
-    unsigned char *d_sep_red, *d_sep_blue, *d_sep_green;   
 
     float *h_filter, *d_filter;  
     float *h_col_filter, *d_col_filter;  
@@ -325,7 +258,7 @@ int main(int argc, char const *argv[]) {
 	int64_t time_diff;
 	float time_diff_float;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	std::string image_name = "monarch";
+	std::string image_name = argv[1];
     std::string infile = "./" + image_name + ".png";
     std::string outfile = "./"+ image_name + "(GPU).png";
     std::string reference = "./"+ image_name + "(serial).png";
@@ -356,42 +289,22 @@ int main(int argc, char const *argv[]) {
 	printArray<float>(h_filter, 9); // printUtility.
 	printArray<float>(h_filter, 9); // printUtility.
 
-	// Create an apron for the input image
-	unsigned int paddedIWidth = img.cols + 2 * 4;
-	unsigned int paddedIHeight = img.rows + 2 * 4;
-	uchar4* h_paddedImage;
-	h_paddedImage = new uchar4[paddedIWidth * paddedIHeight]; // Allocate memory
-	replicationPadding(h_in_img, img.cols, img.rows,4,h_paddedImage, paddedIWidth, paddedIHeight);
-
-	//// test
-	//cv::Mat test_single_2;
-	//cv::Mat test_single_1(paddedIHeight, paddedIWidth, CV_8UC4, h_paddedImage);
-	//cv::cvtColor(test_single_1, test_single_2, cv::COLOR_RGBA2BGR);
-	//cv::imshow("Padded", test_single_2);
-	//cv::waitKey(0);
-
 	// (GPU) The number of pixels within the image
 	const size_t  numPixels = img.rows*img.cols;
-	const size_t numPaddedPixels = paddedIHeight * paddedIWidth;
 
 	// (GPU) The number of parameters within the kernel
 	const size_t numFilterParam = fWidth*fWidth;
 
 	// (GPU) Allocate memory on GPU
-	checkCudaErrors(cudaMalloc((void**)&d_in_img, sizeof(uchar4)*numPaddedPixels));
-	checkCudaErrors(cudaMalloc((void**)&d_red, sizeof(unsigned char)*numPaddedPixels));
-	checkCudaErrors(cudaMalloc((void**)&d_green, sizeof(unsigned char)*numPaddedPixels));
-	checkCudaErrors(cudaMalloc((void**)&d_blue, sizeof(unsigned char)*numPaddedPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_in_img, sizeof(uchar4)*numPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_red, sizeof(unsigned char)*numPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_green, sizeof(unsigned char)*numPixels));
+	checkCudaErrors(cudaMalloc((void**)&d_blue, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_red_blurred, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_green_blurred, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_blue_blurred, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_o_img, sizeof(uchar4)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_filter, sizeof(float)*numFilterParam));
-
-	checkCudaErrors(cudaMalloc((void**)&d_sep_in_img, sizeof(uchar4)*numPixels));
-	checkCudaErrors(cudaMalloc((void**)&d_sep_red, sizeof(unsigned char)*numPixels));
-	checkCudaErrors(cudaMalloc((void**)&d_sep_green, sizeof(unsigned char)*numPixels));
-	checkCudaErrors(cudaMalloc((void**)&d_sep_blue, sizeof(unsigned char)*numPixels));
 	checkCudaErrors(cudaMalloc((void**)&d_row_filter, sizeof(float)*fWidth));
 	checkCudaErrors(cudaMalloc((void**)&d_col_filter, sizeof(float)*fWidth));
 
@@ -400,26 +313,28 @@ int main(int argc, char const *argv[]) {
 	h_o_img = o_img.ptr<uchar4>(0);
 
 	// (GPU) Copy the data from host to device
-	checkCudaErrors(cudaMemcpy(d_in_img, h_paddedImage, sizeof(uchar4)*numPaddedPixels, cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_sep_in_img, h_in_img, sizeof(uchar4)*numPixels, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpy(d_in_img, h_in_img, sizeof(uchar4)*numPixels, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_filter, h_filter, sizeof(float)*numFilterParam, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_row_filter, h_row_filter, sizeof(float)*fWidth, cudaMemcpyHostToDevice));
 	checkCudaErrors(cudaMemcpy(d_col_filter, h_col_filter, sizeof(float)*fWidth, cudaMemcpyHostToDevice));
 
+	int iterations = 10;
+	for (int i = 0; i < iterations; i++) {
 	// (GPU) shared kernel launch code 
-	gauss_blur_shared_mem(d_in_img,paddedIWidth,paddedIHeight,d_filter, fWidth,d_o_img,(img.cols),(img.rows),
+	gauss_blur_shared_mem(d_in_img, d_filter, fWidth,d_o_img,(img.cols),(img.rows),
 		d_red,d_green,d_blue,d_red_blurred,d_green_blurred,d_blue_blurred);
 
 	  //original kernel
-		original_gauss_blur(d_sep_in_img,d_o_img,img.rows,img.cols,d_sep_red,d_sep_green,d_sep_blue \
+	original_gauss_blur(d_in_img,d_o_img,img.rows,img.cols,d_red,d_green,d_blue \
 			,d_red_blurred,d_green_blurred,d_blue_blurred, d_filter, fWidth);
 
 	// (GPU) separable kernel launch 
-	separable_gauss_blur(d_sep_in_img,d_o_img,img.rows,img.cols,d_sep_red,d_sep_green,d_sep_blue \
+	separable_gauss_blur(d_in_img,d_o_img,img.rows,img.cols,d_red,d_green,d_blue \
 			,d_red_blurred,d_green_blurred,d_blue_blurred, d_row_filter, d_col_filter, fWidth);
 
 	//// (GPU) Copy the data from device to host
 	checkCudaErrors(cudaMemcpy(h_o_img, d_o_img, numPixels * sizeof(uchar4), cudaMemcpyDeviceToHost));
+	}
 
 	//// (GPU) Create and save the image with the output data 
 	bool suc_gpu = false;
@@ -537,9 +452,6 @@ int main(int argc, char const *argv[]) {
 	delete[] h_blue_blurred;
 	delete[] r_o_img;
 
-	//test
-	delete[] h_paddedImage;
-
 	// (GPU) free any necessary memory.
 	cudaFree(d_in_img);
 	cudaFree(d_o_img);
@@ -551,11 +463,6 @@ int main(int argc, char const *argv[]) {
 	cudaFree(d_blue_blurred);
 	cudaFree(d_filter);
 
-	//test
-	//cudaFree(d_paddedImage);
-	//cudaFree(d_filteringResult);
-
-//	system("pause");
     return 0;
 }
 

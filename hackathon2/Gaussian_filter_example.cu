@@ -1,124 +1,110 @@
 #include "./gaussian_kernel.h" 
 #include "device_launch_parameters.h"
 
+#ifndef BLOCK
 #define BLOCK 32
+#endif
 
-///
-/// The kernel function for image filtering using constant and shared memory
-/// Note that passing references cannot be used.
-///
-template <typename T>
-__global__ void imageFilteringKernel(const T *d_f, const unsigned int paddedW, const unsigned int paddedH,
-	const unsigned int blockW, const unsigned int blockH, const int S,
-	T *d_h, const unsigned int W, const unsigned int H, float *d_cFilterKernel)
+
+// The kernel function for image filtering using shared memory
+__global__ void imageFilteringKernel(const unsigned char *d_f, const unsigned int blockW, const unsigned int blockH, const int S,
+	unsigned char *d_h, const unsigned int W, const unsigned int H, float *d_cFilterKernel)
 {
 
-	//
-	// Note that blockDim.(x,y) cannot be used instead of blockW and blockH,
-	// because the size of a thread block is not equal to the size of a data block
-	// due to the apron and the use of subblocks.
-	//
+	float pixVal = 0;
 
-	//
-	// Set the size of a tile
-	//
+	// Set the size of a tile (Note: tileW = tileH)
 	const unsigned int tileW = blockW + 2 * S;
-	const unsigned int tileH = blockH + 2 * S;
 
-	// 
-	// Set the number of subblocks in a tile
-	//
-	const unsigned int noSubBlocks = static_cast<unsigned int>(ceil(static_cast<double>(tileH) / static_cast<double>(blockDim.y)));
-
-	//
-	// Set the start position of the block, which is determined by blockIdx. 
-	// Note that since padding is applied to the input image, the origin of the block is ( S, S )
-	//
+	// Set the start position of the block
+	// Note that the origin of the first block is ( S, S )
 	const unsigned int blockStartCol = blockIdx.x * blockW + S;
 	const unsigned int blockEndCol = blockStartCol + blockW;
-
 	const unsigned int blockStartRow = blockIdx.y * blockH + S;
 	const unsigned int blockEndRow = blockStartRow + blockH;
 
-	//
-	// Set the position of the tile which includes the data block and its apron
-	//
+	// Set the position of the tile
+	// Note that the origin of the first tile is(0, 0)
 	const unsigned int tileStartCol = blockStartCol - S;
 	const unsigned int tileEndCol = blockEndCol + S;
-	const unsigned int tileEndClampedCol = min(tileEndCol, paddedW);
-
 	const unsigned int tileStartRow = blockStartRow - S;
 	const unsigned int tileEndRow = blockEndRow + S;
-	const unsigned int tileEndClampedRow = min(tileEndRow, paddedH);
 
-	//
+	// Make sure the tile is within the padded image
+	const unsigned int tileEndClampedCol = ((tileEndCol<W) ? tileEndCol : W);
+	const unsigned int tileEndClampedRow = ((tileEndRow<H) ? tileEndRow : H);
+
 	// Set the size of the filter kernel
-	//
+	// Note: kernelSize denotes the width (or height) of the kernel
 	const unsigned int kernelSize = 2 * S + 1;
 
-	//
-	// Shared memory for the tile
-	//
-	extern __shared__ T sData[];
+	// The shared memory for the tile
+	extern __shared__ unsigned char sData[];
 
-	//
 	// Copy the tile into shared memory
-	//
+	// Recall that the block size is (32,32)
 	unsigned int tilePixelPosCol = threadIdx.x;
-	unsigned int iPixelPosCol = tileStartCol + tilePixelPosCol;
-	for (unsigned int subBlockNo = 0; subBlockNo < noSubBlocks; subBlockNo++) {
-
-		unsigned int tilePixelPosRow = threadIdx.y + subBlockNo * blockDim.y;
-		unsigned int iPixelPosRow = tileStartRow + tilePixelPosRow;
-
-		if (iPixelPosCol < tileEndClampedCol && iPixelPosRow < tileEndClampedRow) { // Check if the pixel in the image
-			unsigned int iPixelPos = iPixelPosRow * paddedW + iPixelPosCol;
+	unsigned int iPixelPosCol = tileStartCol + threadIdx.x;
+	unsigned int tilePixelPosRow = threadIdx.y;
+	unsigned int iPixelPosRow = tileStartRow + threadIdx.y;
+	// Check if the pixel is in the image
+	if (iPixelPosCol < tileEndClampedCol && iPixelPosRow < tileEndClampedRow) { 
+			unsigned int iPixelPos = iPixelPosRow * W + iPixelPosCol;
 			unsigned int tilePixelPos = tilePixelPosRow * tileW + tilePixelPosCol;
 			sData[tilePixelPos] = d_f[iPixelPos];
-		}
-
 	}
 
-	//
 	// Wait for all the threads for data loading
-	//
+	// After '__syncthreads();', the shared memory contains 32x32 pixels
 	__syncthreads();
 
-	//
 	// Perform convolution
-	//
+	// Reset the x and y coordinate
 	tilePixelPosCol = threadIdx.x;
 	iPixelPosCol = tileStartCol + tilePixelPosCol;
-	for (unsigned int subBlockNo = 0; subBlockNo < noSubBlocks; subBlockNo++) {
+	tilePixelPosRow = threadIdx.y;
+	iPixelPosRow = tileStartRow + threadIdx.y;
 
-		unsigned int tilePixelPosRow = threadIdx.y + subBlockNo * blockDim.y;
-		unsigned int iPixelPosRow = tileStartRow + tilePixelPosRow;
-
-
-		// Check if the pixel in the tile and image.
-		// Note that the apron of the tile is excluded.
-		if (iPixelPosCol >= tileStartCol + S && iPixelPosCol < tileEndClampedCol - S &&
-			iPixelPosRow >= tileStartRow + S && iPixelPosRow < tileEndClampedRow - S) {
+	// Check if the pixel is in the tile and image.
+	if(iPixelPosCol >= tileStartCol && iPixelPosCol < tileEndClampedCol &&
+			iPixelPosRow >= tileStartRow && iPixelPosRow < tileEndClampedRow){ 
 
 			// Compute the pixel position for the output image
-			unsigned int oPixelPosCol = iPixelPosCol - S; // removing the origin
-			unsigned int oPixelPosRow = iPixelPosRow - S;
+			unsigned int oPixelPosCol = iPixelPosCol;
+			unsigned int oPixelPosRow = iPixelPosRow;
 			unsigned int oPixelPos = oPixelPosRow * W + oPixelPosCol;
 
+			// Compute the pixel position within the tile
 			unsigned int tilePixelPos = tilePixelPosRow * tileW + tilePixelPosCol;
 
-			d_h[oPixelPos] = 0.0;
-			for (int i = -S; i <= S; i++) {
-				for (int j = -S; j <= S; j++) {
-					int tilePixelPosOffset = i * tileW + j;
-					int coefPos = (i + S) * kernelSize + (j + S);
-					d_h[oPixelPos] += sData[tilePixelPos + tilePixelPosOffset] * d_cFilterKernel[coefPos];
+			// Ignore the pixels on the edge of the images
+			if (iPixelPosCol >= tileStartCol + S && iPixelPosCol < tileEndClampedCol - S &&
+				iPixelPosRow >= tileStartRow + S && iPixelPosRow < tileEndClampedRow - S) {
+
+				// Reset parameters
+				pixVal = 0;
+
+				// Apply Gaussian filter to the image
+				d_h[oPixelPos] = 0.0;
+				for (int i = -S; i <= S; i++) {
+					for (int j = -S; j <= S; j++) {
+						int tilePixelPosOffset = i * tileW + j;
+						int coefPos = (i + S) * kernelSize + (j + S); 
+						pixVal += sData[tilePixelPos + tilePixelPosOffset] * d_cFilterKernel[coefPos];
+					}
 				}
+
+				// Save the result
+				d_h[oPixelPos] = int(pixVal);
 			}
-
+			// Save the pixels for the left and the right edge
+			else if(iPixelPosCol<S || iPixelPosCol>=(W-S)){
+				d_h[oPixelPos] = sData[tilePixelPos];
+			}
+			// Save the pixels for the top and the bottom edge
+			else if(iPixelPosRow<S || iPixelPosRow>=(H-S))
+				d_h[oPixelPos] = sData[tilePixelPos];
 		}
-
-	}
 
 }
 
@@ -276,56 +262,50 @@ void gaussianBlur_row_separable(unsigned char *d_in, unsigned char *d_out,
 	return;
 } 
 
-void gauss_blur_shared_mem(uchar4 *d_padded_image, int padded_width, int padded_height,
-	float *d_filter, int filter_width, uchar4 *d_filterred_result, int img_width, int img_height,
+void gauss_blur_shared_mem(uchar4 *d_padded_image, float *d_filter, int filter_width, uchar4 *d_filterred_result, int img_width, int img_height,
 	unsigned char *d_red, unsigned char *d_green, unsigned char *d_blue,
 	unsigned char *d_rblurred, unsigned char *d_gblurred, unsigned char *d_bblurred)
 {
-	// Set the execution configuration
-	const unsigned int blockW = 32;
-	const unsigned int blockH = 32;
-	const unsigned int tileW = blockW + 2 * 4;
-	const unsigned int tileH = blockH + 2 * 4;
-	const unsigned int threadBlockH = 8;
-
-	const dim3 grid(int(ceil(img_width / blockW)+1), int(ceil(img_height / blockH)+1)); //int(ceil(cols / BLOCK))
-	const dim3 threadBlock(tileW, threadBlockH);
+	// Set the execution configuration for the Gaussian filter kernel
+	const unsigned int tileW = BLOCK;
+	const unsigned int tileH = BLOCK;
+	const unsigned int blockW = tileW - 2*4;
+	const unsigned int blockH = tileH - 2*4;
 
 	// Set the size of shared memory
 	const unsigned int sharedMemorySizeByte = tileW * tileH * sizeof(float);
 
 	// Separate the channels
-	dim3 gridSize_padded(int(ceil(padded_width / blockW) + 1), int(ceil(padded_height / blockH) + 1), 1);
-	dim3 blockSize_padded(int(blockW), int(blockH), 1);
-	separateChannels <<<gridSize_padded, blockSize_padded >>>(d_padded_image, d_red, d_green, d_blue, int(padded_height), int(padded_width));
+	dim3 gridSize_padded(int(ceil(img_width / BLOCK) + 1), int(ceil(img_height / BLOCK) + 1), 1);
+	dim3 blockSize_padded(int(BLOCK), int(BLOCK), 1);
+	separateChannels <<<gridSize_padded, blockSize_padded>>>(d_padded_image, d_red, d_green, d_blue, int(img_height), int(img_width));
 	cudaDeviceSynchronize();
 	checkCudaErrors(cudaGetLastError());
 
-	//
-	imageFilteringKernel << <grid, threadBlock, sharedMemorySizeByte >> >(d_red, padded_width, padded_height,
-		blockW, blockH, 4,
+	// Apply Gaussian filter to the red channel
+	const dim3 grid(int(ceil(img_width / blockW) + 1), int(ceil(img_height / blockH) + 1));
+	const dim3 threadBlock(tileW, tileH);
+	imageFilteringKernel <<<grid, threadBlock, sharedMemorySizeByte>>>(d_red, blockW, blockH, 4,
 		d_rblurred, img_width, img_height, d_filter);
 	cudaDeviceSynchronize();
 	checkCudaErrors(cudaGetLastError());
 
-	//
-	imageFilteringKernel << <grid, threadBlock, sharedMemorySizeByte >> >(d_green, padded_width, padded_height,
-		blockW, blockH, 4,
+	// Apply Gaussian filter to the green channel
+	imageFilteringKernel <<<grid, threadBlock, sharedMemorySizeByte>>>(d_green, blockW, blockH, 4,
 		d_gblurred, img_width, img_height, d_filter);
 	cudaDeviceSynchronize();
 	checkCudaErrors(cudaGetLastError());
 
-	//
-	imageFilteringKernel << <grid, threadBlock, sharedMemorySizeByte >> >(d_blue, padded_width, padded_height,
-		blockW, blockH, 4,
+	// Apply Gaussian filter to the blue channel
+	imageFilteringKernel <<<grid, threadBlock, sharedMemorySizeByte>>>(d_blue, blockW, blockH, 4,
 		d_bblurred, img_width, img_height, d_filter);
 	cudaDeviceSynchronize();
 	checkCudaErrors(cudaGetLastError());
 
 	// Recombine the channels
-	dim3 gridSize_recombine(int(ceil(img_width / blockW) + 1), int(ceil(img_height / blockH) + 1), 1);
-	dim3 blockSize_recombine(int(blockW), int(blockH), 1);
-	recombineChannels << <gridSize_recombine, blockSize_recombine >> >(d_rblurred, d_gblurred, d_bblurred, d_filterred_result, int(img_height), int(img_width));
+	dim3 gridSize_recombine(int(ceil(img_width / BLOCK) + 1), int(ceil(img_height / BLOCK) + 1), 1);
+	dim3 blockSize_recombine(int(BLOCK), int(BLOCK), 1);
+	recombineChannels <<<gridSize_recombine, blockSize_recombine>>>(d_rblurred, d_gblurred, d_bblurred, d_filterred_result, int(img_height), int(img_width));
 	cudaDeviceSynchronize();
 	checkCudaErrors(cudaGetLastError());
 }
